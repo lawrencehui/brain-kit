@@ -1,7 +1,7 @@
 #!/bin/zsh
 # brain-kit installer: creates an EMPTY second-brain vault and wires it into Claude Code.
 #
-#   ./install.sh --vault ~/brain [--dev ~/Dev] [--name brain] [--cli-name brain]
+#   ./install.sh [--vault ~/brain] [--dev ~/Dev] [--name brain] [--cli-name brain]
 #                [--model sonnet] [--skip mcp,cli,schedule,hook,devclaude]
 #
 # Steps (each idempotent; skip any with --skip):
@@ -17,7 +17,7 @@
 set -e
 KIT="${0:A:h}"
 
-VAULT=""; DEV="$HOME/Dev"; NAME="brain"; CLI=""; MODEL="sonnet"; SKIP=""
+VAULT="$HOME/brain"; DEV="$HOME/Dev"; NAME="brain"; CLI=""; MODEL="sonnet"; SKIP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --vault) VAULT="$2"; shift 2 ;;
@@ -30,7 +30,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-[[ -n "$VAULT" ]] || { echo "--vault is required" >&2; exit 2; }
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "--name must be lowercase kebab-case" >&2; exit 2; }
 CLI="${CLI:-$NAME}"
 VAULT="${VAULT:a}"; DEV="${DEV:a}"
@@ -55,6 +54,7 @@ else
   say "creating empty vault at $VAULT"
   mkdir -p "$VAULT"
   cp -R "$KIT/template/." "$VAULT/"
+  mv "$VAULT/_gitignore" "$VAULT/.gitignore"   # stored without the dot: npm strips .gitignore from packages
   today="$(date +%F)"
   for f in "$VAULT/wiki/index.md" "$VAULT/wiki/lessons.md"; do
     sed -i.bak "s/__DATE__/$today/g" "$f" && rm -f "$f.bak"

@@ -1,0 +1,39 @@
+{
+  "name": "create-second-brain",
+  "version": "0.1.0",
+  "description": "An empty, self-maintaining second brain for Claude Code: markdown wiki + MCP server + scheduled sync + lessons ledger",
+  "bin": {
+    "create-second-brain": "bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "engine/",
+    "template/",
+    "install.sh",
+    "get.sh",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "second-brain",
+    "obsidian",
+    "knowledge-base",
+    "agent-memory"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lawrencehui/brain-kit.git"
+  },
+  "type": "module"
+}
