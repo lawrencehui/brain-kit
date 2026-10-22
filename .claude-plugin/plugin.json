@@ -1,0 +1,19 @@
+{
+  "name": "brain-kit",
+  "version": "0.2.0",
+  "description": "Self-maintaining second brain: MCP search/capture, just-in-time lessons before tool calls, repo context at session start, auto-captured worklogs.",
+  "author": {
+    "name": "Lawrence Hui"
+  },
+  "homepage": "https://github.com/lawrencehui/brain-kit",
+  "license": "MIT",
+  "mcpServers": {
+    "brain": {
+      "command": "sh",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/brain-run",
+        "mcp"
+      ]
+    }
+  }
+}

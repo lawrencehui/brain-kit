@@ -1,0 +1,23 @@
+#!/bin/sh
+# Launcher used by the Claude Code plugin: finds the installed brain and runs one of its parts.
+#   brain-run mcp | lesson-hook | session-hook | autocapture
+# Vault: $BRAIN_VAULT, else the path in ~/.config/brain-kit/vault (written by install.sh), else ~/brain.
+# Hooks exit 0 silently when no brain is installed yet, so the plugin never gets in the way.
+VAULT="${BRAIN_VAULT:-}"
+[ -z "$VAULT" ] && [ -f "$HOME/.config/brain-kit/vault" ] && VAULT="$(cat "$HOME/.config/brain-kit/vault")"
+[ -z "$VAULT" ] && VAULT="$HOME/brain"
+M="$VAULT/meta"
+if [ ! -f "$M/brain.env" ]; then
+  if [ "$1" = "mcp" ]; then
+    echo "brain-kit: no brain at $VAULT. Run /brain-kit:init in Claude Code (or: npx create-second-brain --skip mcp,hook)." >&2
+    exit 1
+  fi
+  cat >/dev/null; exit 0
+fi
+case "$1" in
+  mcp)          exec node "$M/mcp/server.js" ;;
+  lesson-hook)  exec python3 "$M/lesson-hook.py" ;;
+  session-hook) exec python3 "$M/session-hook.py" ;;
+  autocapture)  exec zsh "$M/autocapture-hook.sh" ;;
+  *) echo "brain-run: unknown part '$1'" >&2; exit 2 ;;
+esac

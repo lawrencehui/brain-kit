@@ -7,3 +7,7 @@ meta/launchd.err.log
 meta/mcp/node_modules/
 meta/.sync-state
 meta/lessons-injection-preview.md
+meta/lessons-manifest.json
+meta/.capture-dedup
+meta/.proposed-notified
+__pycache__/

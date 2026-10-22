@@ -1,6 +1,6 @@
 {
   "name": "create-second-brain",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An empty, self-maintaining second brain for Claude Code: markdown wiki + MCP server + scheduled sync + lessons ledger",
   "bin": {
     "create-second-brain": "bin/cli.js"
@@ -12,7 +12,10 @@
     "install.sh",
     "get.sh",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    ".claude-plugin/",
+    "hooks/",
+    "commands/"
   ],
   "engines": {
     "node": ">=18"

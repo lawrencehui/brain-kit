@@ -22,13 +22,26 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFile, readFile, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
+
+/** Run a command, feed `input` on stdin, resolve with stdout; reject on non-zero exit. */
+function runWithStdin(cmd, args, input) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolvePromise(out) : reject(new Error(err.trim() || `${cmd} exited ${code}`))));
+    child.stdin.end(input);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -36,7 +49,6 @@ const execFileAsync = promisify(execFile);
 
 const VAULT = resolve(process.env.BRAIN_VAULT || join(dirname(fileURLToPath(import.meta.url)), "..", ".."));
 const BRAIN_NAME = process.env.BRAIN_NAME || "brain";
-const JOURNAL = join(VAULT, "raw", "journal");
 const CHARACTER_LIMIT = 25000; // cap any single response to protect agent context
 const KINDS = ["note", "finding", "feedback", "worklog", "idea"];
 
@@ -54,19 +66,6 @@ function safeVaultPath(rel) {
     throw new Error(`Path escapes the vault: ${rel}`);
   }
   return abs;
-}
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-/** Local-time stamp + random suffix → collision-safe filename, same scheme as brain.sh. */
-function stamp() {
-  const d = new Date();
-  const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  const time = `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
-  const rand = String(Math.floor(Math.random() * 9000) + 1000);
-  return { date, time, rand, name: `${date}-${time}-${rand}.md` };
 }
 
 function truncate(text, note) {
@@ -395,28 +394,20 @@ Returns the vault-relative path of the file written, plus structuredContent { pa
     },
   },
   async ({ text, project, kind }) => {
+    // One write path for every capture: capture.py redacts credentials and skips duplicates.
     try {
-      await mkdir(JOURNAL, { recursive: true });
-      const { date, name } = stamp();
-      const abs = join(JOURNAL, name);
-      const fm = [
-        "---",
-        `captured: ${date}`,
-        "from: mcp",
-        `cwd: ${process.cwd()}`,
-        `project: ${project || ""}`,
-        `kind: ${kind}`,
-        "status: unprocessed",
-        "---",
-        "",
-        text.trim(),
-        "",
-      ].join("\n");
-      await writeFile(abs, fm, { flag: "wx" }); // wx → never clobber
-      const rel = relative(VAULT, abs);
+      const args = [join(VAULT, "meta", "capture.py"), "--from", "mcp", "--cwd", process.cwd(), "--kind", kind, "--porcelain"];
+      if (project) args.push("--project", project);
+      const out = (await runWithStdin("python3", args, text)).trim();
+      if (out === "DUPLICATE") {
+        return {
+          content: [{ type: "text", text: "Skipped: an identical note was captured in the last 10 minutes." }],
+          structuredContent: { path: null, project: project || null, kind, duplicate: true },
+        };
+      }
       return {
-        content: [{ type: "text", text: `Captured → ${rel}\nThe next scheduled sync will ingest and cross-link it (or run /ingest in the vault to process now).` }],
-        structuredContent: { path: rel, project: project || null, kind },
+        content: [{ type: "text", text: `Captured → ${out}\nThe next scheduled sync will ingest and cross-link it (or run /ingest in the vault to process now).` }],
+        structuredContent: { path: out, project: project || null, kind, duplicate: false },
       };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: could not capture note: ${err.message}` }], isError: true };

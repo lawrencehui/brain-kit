@@ -10,7 +10,7 @@
 #   cli        symlink <vault>/meta/brain.sh to ~/.local/bin/<cli-name>
 #   mcp        claude mcp add -s user <name> (stdio, node <vault>/meta/mcp/server.js)
 #   schedule   launchd job (macOS) or crontab line (Linux): sync at 00/06/12/18:02
-#   hook       PostCompact auto-capture hook in ~/.claude/settings.json
+#   hook       PostCompact auto-capture, PreToolUse just-in-time lessons, SessionStart repo context
 #   devclaude  sentinel block in <dev>/CLAUDE.md telling every agent to use the brain
 #
 # Re-running against an existing brain refreshes the engine files only; content is untouched.
@@ -18,13 +18,14 @@ set -e
 KIT="${0:A:h}"
 
 VAULT="$HOME/brain"; DEV="$HOME/Dev"; NAME="brain"; CLI=""; MODEL="sonnet"; SKIP=""
+GIVEN_DEV=0; GIVEN_NAME=0; GIVEN_MODEL=0; GIVEN_CLI=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --vault) VAULT="$2"; shift 2 ;;
-    --dev) DEV="$2"; shift 2 ;;
-    --name) NAME="$2"; shift 2 ;;
-    --cli-name) CLI="$2"; shift 2 ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --dev) DEV="$2"; GIVEN_DEV=1; shift 2 ;;
+    --name) NAME="$2"; GIVEN_NAME=1; shift 2 ;;
+    --cli-name) CLI="$2"; GIVEN_CLI=1; shift 2 ;;
+    --model) MODEL="$2"; GIVEN_MODEL=1; shift 2 ;;
     --skip) SKIP=",$2,"; shift 2 ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -48,6 +49,12 @@ CLAUDE_BIN="$(command -v claude || true)"
 UPGRADE=0
 if [[ -f "$VAULT/meta/brain.env" ]]; then
   UPGRADE=1; say "existing brain at $VAULT: refreshing engine files only"
+  # Keep this brain's existing settings unless a flag overrides them.
+  old() { sed -n "s/^$1=//p" "$VAULT/meta/brain.env" | head -1 | tr -d '"'; }
+  [[ $GIVEN_DEV -eq 1 ]] || DEV="$(old DEV)"
+  [[ $GIVEN_NAME -eq 1 ]] || NAME="$(old BRAIN_NAME)"
+  [[ $GIVEN_MODEL -eq 1 ]] || MODEL="$(old SYNC_MODEL)"
+  [[ $GIVEN_CLI -eq 1 ]] || CLI="$NAME"
 elif [[ -d "$VAULT" && -n "$(ls -A "$VAULT" 2>/dev/null)" ]]; then
   echo "$VAULT exists and is not empty; refusing to install into it" >&2; exit 1
 else
@@ -64,23 +71,48 @@ fi
 
 mkdir -p "$VAULT/meta/mcp"
 cp "$KIT/engine/sync.sh" "$KIT/engine/brain.sh" "$KIT/engine/autocapture-hook.sh" \
-   "$KIT/engine/render-lessons.py" "$KIT/engine/digest.py" "$VAULT/meta/"
+   "$KIT/engine/render-lessons.py" "$KIT/engine/digest.py" "$KIT/engine/lessonlib.py" \
+   "$KIT/engine/capture.py" "$KIT/engine/lessons.py" "$KIT/engine/lesson-hook.py" \
+   "$KIT/engine/session-hook.py" "$VAULT/meta/"
 cp "$KIT/engine/mcp/server.js" "$KIT/engine/mcp/package.json" "$KIT/engine/mcp/smoke-test.mjs" "$VAULT/meta/mcp/"
-chmod +x "$VAULT/meta/"*.sh "$VAULT/meta/render-lessons.py"
+chmod +x "$VAULT/meta/"*.sh "$VAULT/meta/"*.py
 
-# Machine-specific config; gitignored so the vault itself stays portable.
+# Upgrades: add config keys and gitignore lines introduced by newer kits, never touching existing values.
+python3 - "$KIT/engine/lessons-routing.json" "$VAULT/meta/lessons-routing.json" "$KIT/template/_gitignore" "$VAULT/.gitignore" <<'MERGE'
+import json, pathlib, sys
+default, mine, gi_default, gi_mine = map(pathlib.Path, sys.argv[1:])
+cfg = json.loads(mine.read_text()) if mine.exists() else {}
+merged = {**json.loads(default.read_text()), **cfg}
+if merged != cfg:
+    mine.write_text(json.dumps(merged, indent=2) + "\n")
+text = gi_mine.read_text() if gi_mine.exists() else ""
+have = set(text.splitlines())
+add = [l for l in gi_default.read_text().splitlines() if l and l not in have]
+if add:
+    gi_mine.write_text(text + ("" if text.endswith("\n") or not text else "\n") + "\n".join(add) + "\n")
+MERGE
+
+# Machine-specific config; gitignored so the vault itself stays portable. Extra keys a user
+# added (e.g. SYNC_EXCLUDE) survive an upgrade.
+extra="$( [[ -f "$VAULT/meta/brain.env" ]] && grep -vE '^(BRAIN_NAME|DEV|CLAUDE_BIN|SYNC_MODEL)=' "$VAULT/meta/brain.env" || true )"
 cat > "$VAULT/meta/brain.env" <<EOF
 BRAIN_NAME="$NAME"
 DEV="$DEV"
 CLAUDE_BIN="$CLAUDE_BIN"
 SYNC_MODEL="$MODEL"
 EOF
+[[ -n "$extra" ]] && print -r -- "$extra" >> "$VAULT/meta/brain.env"
+
+# Pointer the Claude Code plugin uses to find the default brain.
+if [[ "$NAME" == "brain" || ! -f "$HOME/.config/brain-kit/vault" ]]; then
+  mkdir -p "$HOME/.config/brain-kit" && print -r -- "$VAULT" > "$HOME/.config/brain-kit/vault"
+fi
 
 # --- npm + smoke test -------------------------------------------------------
 say "installing MCP server deps"
 (cd "$VAULT/meta/mcp" && npm install --silent --no-fund --no-audit)
 (cd "$VAULT/meta/mcp" && node smoke-test.mjs) || { echo "MCP smoke test failed" >&2; exit 1; }
-python3 "$VAULT/meta/render-lessons.py" >/dev/null
+python3 "$VAULT/meta/render-lessons.py" --apply >/dev/null
 
 if [[ ! -d "$VAULT/.git" ]]; then
   git -C "$VAULT" init -q
@@ -149,21 +181,33 @@ EOF
   fi
 fi
 
-# --- hook -------------------------------------------------------------------
+# --- hooks ------------------------------------------------------------------
 if ! skip hook; then
-  python3 - "$HOME/.claude/settings.json" "$VAULT/meta/autocapture-hook.sh" <<'PY'
+  python3 - "$HOME/.claude/settings.json" "$VAULT/meta" <<'HOOKS'
 import json, pathlib, sys
-path, cmd = pathlib.Path(sys.argv[1]), sys.argv[2]
+path, meta = pathlib.Path(sys.argv[1]), sys.argv[2]
+wanted = [
+    ("PostCompact", None, f"{meta}/autocapture-hook.sh", 30, "auto-capture worklogs on compaction"),
+    ("PreToolUse", "*", f"python3 {meta}/lesson-hook.py", 5, "just-in-time lessons before tool calls"),
+    ("SessionStart", None, f"python3 {meta}/session-hook.py", 10, "load this repo's brain page at session start"),
+]
 cfg = json.loads(path.read_text()) if path.exists() else {}
-groups = cfg.setdefault("hooks", {}).setdefault("PostCompact", [])
-if any(h.get("command") == cmd for g in groups for h in g.get("hooks", [])):
-    print("hook already registered")
-else:
-    groups.append({"hooks": [{"type": "command", "command": cmd, "timeout": 30}]})
+changed = False
+for event, matcher, cmd, timeout, what in wanted:
+    groups = cfg.setdefault("hooks", {}).setdefault(event, [])
+    if any(h.get("command") == cmd for g in groups for h in g.get("hooks", [])):
+        print(f"{event} hook already registered ({what})")
+        continue
+    group = {"hooks": [{"type": "command", "command": cmd, "timeout": timeout}]}
+    if matcher:
+        group = {"matcher": matcher, **group}
+    groups.append(group)
+    changed = True
+    print(f"{event} hook registered ({what})")
+if changed:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cfg, indent=2) + "\n")
-    print("PostCompact auto-capture hook registered")
-PY
+HOOKS
 fi
 
 # --- devclaude --------------------------------------------------------------

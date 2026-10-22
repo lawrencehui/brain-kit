@@ -1,5 +1,15 @@
 {
-  "inject_severities": ["high"],
+  "inject_severities": [
+    "high"
+  ],
+  "jit_severities": [
+    "high",
+    "med"
+  ],
+  "inject_token_budget": 2000,
+  "stale_days": 180,
+  "session_context_chars": 6000,
   "repo_stacks": {},
-  "project_to_repos": {}
+  "project_to_repos": {},
+  "legacy_markers": []
 }

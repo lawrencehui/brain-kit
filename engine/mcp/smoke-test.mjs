@@ -1,6 +1,6 @@
 // Stdio smoke test: handshake, list tools, capture a note, find it, read it, clean up.
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { rm, readFile } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +33,7 @@ let allPass = true;
 const check = (name, cond) => { allPass = allPass && !!cond; console.log(`[${cond ? "PASS" : "FAIL"}] ${name}`); };
 const token = `smoketoken${Date.now()}`;
 let captured = null;
+let secretPath = null;
 try {
   const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke", version: "0" } });
   check("initialize", /-mcp-server$/.test(init?.result?.serverInfo?.name || ""));
@@ -48,10 +49,17 @@ try {
   check("brain_read returns it", (r?.result?.content?.[0]?.text || "").includes(token));
   const esc = await rpc("tools/call", { name: "brain_read", arguments: { path: "../../etc/passwd" } });
   check("brain_read refuses vault escape", esc?.result?.isError === true);
+  const dup = await rpc("tools/call", { name: "brain_capture", arguments: { text: `smoke ${token}`, project: "smoke", kind: "note" } });
+  check("brain_capture skips an identical capture", dup?.result?.structuredContent?.duplicate === true);
+  const key = "sk-ant-" + "x".repeat(30);
+  const sec = await rpc("tools/call", { name: "brain_capture", arguments: { text: `secret ${token} ${key} password=hunter2hunter2`, kind: "note" } });
+  secretPath = sec?.result?.structuredContent?.path;
+  const secBody = secretPath ? await readFile(join(VAULT, secretPath), "utf8") : "";
+  check("brain_capture redacts credentials before writing", secBody.includes("[REDACTED:api-key]") && !secBody.includes(key) && !secBody.includes("hunter2hunter2") && /redacted: 2/.test(secBody));
   const c = await rpc("tools/call", { name: "brain_context", arguments: { project: "no-such-project" } });
   check("brain_context answers for unknown project", /No project page/.test(c?.result?.content?.[0]?.text || ""));
 } finally {
-  if (captured) await rm(join(VAULT, captured), { force: true });
+  for (const p of [captured, secretPath]) if (p) await rm(join(VAULT, p), { force: true });
   proc.kill();
 }
 console.log(allPass ? "ALL PASS" : "SOME FAILED");

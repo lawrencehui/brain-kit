@@ -1,0 +1,16 @@
+{
+  "name": "brain-kit",
+  "owner": {
+    "name": "Lawrence Hui"
+  },
+  "plugins": [
+    {
+      "name": "brain-kit",
+      "source": "./",
+      "description": "Self-maintaining second brain for Claude Code. After installing, run /brain-kit:init once."
+    }
+  ],
+  "metadata": {
+    "description": "brain-kit: a self-maintaining second brain for Claude Code"
+  }
+}

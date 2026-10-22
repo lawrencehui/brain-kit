@@ -13,17 +13,24 @@ Cross-repo lessons so agent sessions don't repeat the same mistakes. Maintained 
 (mines `raw/` corrections + `git log` revert/fix commits), rendered into `CLAUDE.md` files by
 `meta/render-lessons.py`.
 
-**Schema (one `### L###` block per lesson, parsed by `render-lessons.py`; keep the field names):**
+**Schema (one `### L###` block per lesson, parsed by `meta/lessonlib.py`; keep the field names):**
 - `scope:` `universal` · `stack:<name>` (e.g. `stack:supabase`) · `repo:<path-under-DEV>` · `project:<slug>`
 - `trigger:` the situation that should surface this lesson ("when ...")
-- `mistake:` what went wrong (1 line)
-- `rule:` what to do instead (1 line, imperative)
+- `mistake:` what went wrong
+- `rule:` what to do instead (imperative)
+- `summary:` one self-contained line under 200 characters ("When X, do Y"); this is what goes into `CLAUDE.md`
 - `severity:` `high` | `med` | `low`
-- `hits:` times observed
+- `hits:` times observed · `last_seen:` YYYY-MM-DD it was last observed
+- `status:` `proposed` (new, not injected) · `active` · `retired`. Missing means active.
+- `match:` optional. Tool-call conditions that fire the lesson just before the call (PreToolUse hook).
+  Alternatives joined by ` || `, conditions by ` && `, each `kind:regex` with kind `tool` (tool name),
+  `cmd` (Bash command), `path` (file path) or `text` (whole tool input). Case-insensitive.
+  Example: `cmd:git\s+filter-repo || tool:^(Write|Edit)$ && path:\.sql$`
+- `superseded_by:` L### that replaces this lesson · `graduated:` it became a hook/lint/test
 - `source:` where it came from
 
-Ranking for injection: `severity` then `hits`. Only severities listed in `meta/lessons-routing.json`
-are injected; the rest stay search-only. A `graduated:` field (lesson became a hook/lint/test/CI
-guardrail) excludes it from injection.
+Injection (`meta/render-lessons.py`): live lessons (active, not superseded, graduated or stale) without a `match:`
+go into `CLAUDE.md` as one line each, ranked severity > hits > recency and cut at the token budget in
+`meta/lessons-routing.json`. Lessons with a `match:` are injected just in time instead.
 
 ---
