@@ -1,0 +1,9 @@
+.DS_Store
+.obsidian/workspace*.json
+meta/brain.env
+meta/sync.log
+meta/launchd.out.log
+meta/launchd.err.log
+meta/mcp/node_modules/
+meta/.sync-state
+meta/lessons-injection-preview.md

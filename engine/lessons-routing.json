@@ -1,0 +1,5 @@
+{
+  "inject_severities": ["high"],
+  "repo_stacks": {},
+  "project_to_repos": {}
+}
