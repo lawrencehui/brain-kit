@@ -76,6 +76,11 @@ def main():
 
     routing = L.load_routing()
     all_lessons = L.parse(L.LESSONS.read_text())
+    seen, dupes = set(), []
+    for l in all_lessons:
+        (dupes.append(l["id"]) if l["id"] in seen else seen.add(l["id"]))
+    if dupes:  # approve/retire/show act on the first block with an id, so duplicates are a real defect
+        print(f"[render-lessons] WARNING duplicate lesson ids (renumber them): {', '.join(sorted(set(dupes)))}", file=sys.stderr)
     live = [l for l in all_lessons if L.live(l, routing)]
     proposed = [l["id"] for l in all_lessons if l["status"] == "proposed"]
 

@@ -122,16 +122,25 @@ def parse_match(spec):
       path  file_path / path / notebook_path of the tool input
       text  the whole tool input serialised as JSON
     Example: `cmd:git\\s+filter-repo || tool:^(Write|Edit)$ && path:\\.sql$`
-    Returns [[(kind, regex_str), ...], ...]; raises ValueError on bad syntax or regex."""
+    Returns [[(kind, regex_str), ...], ...]; raises ValueError on bad syntax, a bad regex, or a
+    regex that matches the empty string."""
+    # Split only where the next token is a condition prefix, so `cmd:a|| cmd:b` (no space before
+    # ||) splits correctly and a regex's own `|` alternation is never mistaken for a separator.
     alts = []
-    for alt in spec.split(" || "):
+    for alt in re.split(r"\s*\|\|\s*(?=(?:tool|cmd|path|text):)", spec.strip()):
         conds = []
-        for cond in alt.split(" && "):
+        for cond in re.split(r"\s*&&\s*(?=(?:tool|cmd|path|text):)", alt.strip()):
             kind, sep, rx = cond.strip().partition(":")
+            rx = rx.strip()
             if not sep or kind not in ("tool", "cmd", "path", "text") or not rx:
                 raise ValueError(f"bad matcher condition: {cond!r}")
             re.compile(rx, re.I)
             conds.append((kind, rx))
+        # An alternative whose every condition matches the empty string matches every call
+        # (e.g. `cmd:a|` or `text:.*`); refuse it. A lone negative lookahead is fine when
+        # another condition in the same alternative does the narrowing.
+        if all(re.search(rx, "", re.I) for _, rx in conds):
+            raise ValueError(f"matcher matches everything: {alt.strip()!r}")
         alts.append(conds)
     return alts
 
