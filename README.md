@@ -109,7 +109,7 @@ brain lessons retire L012 --superseded-by L080
 brain lessons list --active             # what's live now
 ```
 
-New lessons from the sync are `proposed` and are never injected until you approve them. Once a day, the session-start hook mentions any that are waiting.
+New lessons from the sync are `proposed` and are never injected until you approve them. This is enforced in code, not left to the model: the sync snapshots the ledger before Claude runs, and afterwards `brain lessons gate` forces every newly added lesson to `proposed` and gives it a unique ID, whatever the model wrote. Once a day, the session-start hook mentions any that are waiting.
 
 **Inside the vault**, Claude Code has three slash commands:
 

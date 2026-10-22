@@ -37,7 +37,7 @@ Scheduled brain sync for this Obsidian second-brain wiki. Obey CLAUDE.md. Be con
 2. REFRESH REPOS: For each git repo under __DEV__ EXCEPT "__VAULT_NAME__"__EXCLUDE_NOTE__ (repos may be nested; search up to 4 levels deep, skip node_modules): run `git -C <repo> rev-parse --short HEAD`. If that HEAD differs from the hash in the repo's most recent meta/log.md refresh line (or it has never been refreshed), re-read its high-signal files (README, manifests, structure, `git log --oneline -10`) and create or update wiki/projects/<slug>.md in place, then append a log line like `YYYY-MM-DD - refresh <repo> @<HEAD> -> wiki/projects/<slug>.md`. Never copy source code.
 
 3. LESSONS: Update wiki/lessons.md so agents stop repeating mistakes. (a) In repos refreshed this run, scan `git log --oneline -15` for commits signalling a fixed mistake (revert, rollback, hotfix, `fix:`, "regression"). (b) Scan newly-ingested raw/ captures of kind=feedback or explicit user corrections. For each genuine, generalisable mistake add or update a `### L###` block following the schema at the TOP of wiki/lessons.md. Rules:
-   - A NEW lesson takes the next unused L number (check the highest existing id first; ids must be unique) and always gets `- status: proposed` (a human approves it with `brain lessons approve`), `- last_seen: <today>`, and `- summary:` (one self-contained imperative line under 200 characters, starting "When ...").
+   - A NEW lesson takes the id printed by `python3 meta/lessons.py next-id` and always gets `- status: proposed` (a human approves it with `brain lessons approve`), `- last_seen: <today>`, and `- summary:` (one self-contained imperative line under 200 characters, starting "When ...").
    - Add `- match:` ONLY when the mistake happens at a recognisable tool call (a command, a file type, a tool), so the lesson can fire just before it. Keep matchers specific: a matcher that would fire on ordinary everyday commands is worse than none. Syntax is in the schema header.
    - Do NOT duplicate a lesson: bump its `hits:` and set `last_seen:` to today instead. If a new lesson replaces an old one, set `- superseded_by: L###` on the old one.
    - Never change the `status:` of an existing lesson. If the same class of mistake appears in 2+ repos, promote `scope:` to `universal`. Keep lessons atomic and few. If nothing qualifies, leave the ledger unchanged.
@@ -50,9 +50,16 @@ PROMPT="${PROMPT//__DEV__/$DEV}"
 PROMPT="${PROMPT//__VAULT_NAME__/$VAULT_NAME}"
 PROMPT="${PROMPT//__EXCLUDE_NOTE__/${SYNC_EXCLUDE:+ and any path matching the regex $SYNC_EXCLUDE}}"
 
+cp wiki/lessons.md meta/.lessons-before 2>/dev/null || : > meta/.lessons-before
 "$CLAUDE_BIN" -p "$PROMPT" --permission-mode bypassPermissions --model "${SYNC_MODEL:-sonnet}" >> meta/sync.log 2>&1
 rc=$?
 
+# Approval gate in code: whatever the model wrote, lessons added this run are `proposed`
+# and get a unique id. Then commit that correction along with the run.
+python3 meta/lessons.py gate --before meta/.lessons-before >> meta/sync.log 2>&1
+if [[ -n "$(git status --porcelain wiki/lessons.md)" ]]; then
+  git add wiki/lessons.md && git commit -qm "chore: lessons gate $(date +%F)" >> meta/sync.log 2>&1
+fi
 python3 meta/render-lessons.py --apply >> meta/sync.log 2>&1
 
 # Advance the signature only on a clean run, so failures retry next time.

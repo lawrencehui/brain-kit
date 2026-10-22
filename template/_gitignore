@@ -11,3 +11,4 @@ meta/lessons-manifest.json
 meta/.capture-dedup
 meta/.proposed-notified
 __pycache__/
+meta/.lessons-before

@@ -6,6 +6,9 @@
   approve L073 [L074 ...]                       proposed -> active
   retire L012 [--superseded-by L080]            active -> retired (kept in the ledger, never injected)
   render                                        re-render CLAUDE.md blocks and the hook manifest
+  next-id                                       print the next unused lesson id
+  gate --before FILE                            (run by sync.sh) force lessons added since FILE to
+                                                `proposed` and renumber any whose id collides
 
 approve and retire re-render immediately, so the change reaches the next session.
 """
@@ -53,6 +56,8 @@ def main():
     rt.add_argument("ids", nargs="+")
     rt.add_argument("--superseded-by", dest="by")
     sub.add_parser("render")
+    sub.add_parser("next-id")
+    sub.add_parser("gate").add_argument("--before", required=True)
     a = ap.parse_args()
 
     lessons = L.parse(L.LESSONS.read_text())
@@ -104,6 +109,60 @@ def main():
     if a.cmd == "render":
         render()
         return 0
+
+    if a.cmd == "next-id":
+        print(next_id(lessons))
+        return 0
+
+    if a.cmd == "gate":
+        return gate(pathlib.Path(a.before))
+
+
+def next_id(lessons):
+    return f"L{max([int(l['id'][1:]) for l in lessons] or [0]) + 1:03}"
+
+
+def gate(before_path):
+    """The approval gate, enforced in code rather than trusted to the sync's model.
+
+    A lesson block is new if its header did not exist in the pre-sync ledger. Every new
+    lesson is forced to `status: proposed` (whatever the model wrote), and given a fresh id
+    if its id collides with another block. Existing lessons are left alone."""
+    before = L.parse(before_path.read_text()) if before_path.exists() else []
+    old_titles = {l["title"] for l in before}
+    text = L.LESSONS.read_text()
+    changed = []
+    while True:
+        lessons = L.parse(text)
+        counts = {}
+        for l in lessons:
+            counts[l["id"]] = counts.get(l["id"], 0) + 1
+        todo = None
+        for l in lessons:
+            if l["title"] in old_titles:
+                continue
+            if counts[l["id"]] > 1:
+                todo = ("renumber", l)
+                break
+            if l["status"] != "proposed":
+                todo = ("propose", l)
+                break
+        if todo is None:
+            break
+        kind, l = todo
+        if kind == "renumber":
+            new = next_id(lessons)
+            head = text[l["start"]:l["end"]].replace(f"### {l['id']}", f"### {new}", 1)
+            text = text[:l["start"]] + head + text[l["end"]:]
+            old_titles.discard(l["title"])
+            changed.append(f"{l['id']}->{new}")
+        else:
+            text = L.set_field(text, l, "status", "proposed")
+            changed.append(f"{l['id']} proposed")
+    if changed:
+        L.LESSONS.write_text(text)
+    print(f"[lessons gate] {', '.join(changed) if changed else 'no new lessons'}")
+    return 0
 
 
 if __name__ == "__main__":
